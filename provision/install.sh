@@ -252,6 +252,25 @@ install_firefox_policies() {
   echo "Policies installed in $appdir/distribution/"
 }
 
+install_sound() {
+  log "Sound (out of the screen only)"
+  # WirePlumber in the kiosk user's session reads this: the screen's output
+  # (HDMI/DisplayPort) is the default, starts at full volume, and the PC's own
+  # outputs are off (docs/SOUND.md).
+  install -D -m 0755 "$ROOTFS/usr/local/sbin/tvwalle-sound" /usr/local/sbin/tvwalle-sound
+  local conf=/etc/wireplumber/wireplumber.conf.d/50-tvwalle.conf home
+  if install_if_changed 0644 "$ROOTFS$conf" "$conf"; then
+    # Volumes WirePlumber remembered under the old settings would win over the
+    # new default; nobody sets one on a kiosk, so they go.
+    home="$(getent passwd "$KIOSK_USER" | cut -d: -f6)"
+    [ -n "$home" ] && rm -f "$home/.local/state/wireplumber/default-routes"
+    # A running session picks the rules up now, not at the next restart.
+    if systemctl --user -M "$KIOSK_USER@" is-active --quiet wireplumber.service 2>/dev/null; then
+      systemctl --user -M "$KIOSK_USER@" restart wireplumber.service || true
+    fi
+  fi
+}
+
 enable_kiosk() {
   log "Kiosk service"
   systemctl daemon-reload
@@ -362,6 +381,7 @@ main() {
   install_files
   install_boot_splash
   install_firefox_policies
+  install_sound
   enable_kiosk
   enable_controller
   install_upkeep

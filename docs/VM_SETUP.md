@@ -21,7 +21,7 @@ The file is named like `ubuntu-26.04.1-live-server-arm64.iso`.
 7. In the settings that open:
    - **Display** → Emulated Display Card: **virtio-gpu-pci**. The kiosk needs a real graphics device; the default framebuffer-only card can't run it. Avoid the `-gl` variant for now, it's the one that most often misbehaves.
    - **Network**: leave **Shared Network**. The Mac can reach the VM at its 192.168.64.x address.
-   - **Sound**: leave the default (the TV's call audio is tested later).
+   - **Sound**: leave the default. The VM has no screen with sound, so with TVWallE's sound rules ([SOUND.md](SOUND.md)) its sound goes nowhere ("Dummy Output").
    - Save.
 
 UEFI is UTM's default for this kind of VM, which matches the real PC.

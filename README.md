@@ -10,11 +10,11 @@ Built for Doctor Insurance One's office TVs, so the default page is its CRM's TV
 |---|---|
 | `provision/` | `install.sh`, which turns a fresh Ubuntu Server into the kiosk (safe to re-run) |
 | `installer/` | The installer USB's settings (`autoinstall.yaml`) and its three steps: `early`, `late`, `firstboot` |
-| `rootfs/` | Files copied onto the machine as they are: systemd units, PAM session, polkit rule, sway kiosk config, Firefox policies, settings, the web controller, the updater, the Plymouth theme, the GRUB drop-in, the start page, `tvwalle-screenshot`, `tvwalle-passwd` |
+| `rootfs/` | Files copied onto the machine as they are: systemd units, PAM session, polkit rule, sway kiosk config, Firefox policies, the sound rules, settings, the web controller, the updater, the Plymouth theme, the GRUB drop-in, the start page, `tvwalle-screenshot`, `tvwalle-passwd`, `tvwalle-sound` |
 | `release/` | The public half of the release key every kiosk checks updates against |
 | `branding/` | The logo: the source, the transparent version and the splash canvas |
 | `tools/` | Helpers run from a Mac: `build-installer.sh` (the USB image; its container tools in `isotools/`), `release.sh` (publishes a signed release), `deploy.sh` (development), `make-branding.py` |
-| `docs/` | Guides: [the installer USB](docs/INSTALLER.md), [updates](docs/UPDATES.md), [the web controller](docs/CONTROLLER.md), [the boot splash](docs/BOOT_SPLASH.md), [nightly upkeep and access](docs/UPKEEP.md), [the dev VM](docs/VM_SETUP.md) |
+| `docs/` | Guides: [the installer USB](docs/INSTALLER.md), [updates](docs/UPDATES.md), [the web controller](docs/CONTROLLER.md), [the boot splash](docs/BOOT_SPLASH.md), [sound](docs/SOUND.md), [nightly upkeep and access](docs/UPKEEP.md), [the dev VM](docs/VM_SETUP.md) |
 
 **A new PC** is installed from the USB: [docs/INSTALLER.md](docs/INSTALLER.md). Its first start installs the latest release from GitHub.
 

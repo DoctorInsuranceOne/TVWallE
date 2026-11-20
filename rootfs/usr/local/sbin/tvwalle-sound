@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# TVWallE: where does the kiosk's sound go?
+#
+#   sudo tvwalle-sound          the sound cards, the screen on each display output,
+#                               the outputs (* = the one in use) and the card profiles
+#   sudo tvwalle-sound tones    also plays a 2-second tone on each output in turn
+#
+# Changes nothing. Sound runs in the kiosk user's session (PipeWire +
+# WirePlumber); TVWallE's rules are in
+# /etc/wireplumber/wireplumber.conf.d/50-tvwalle.conf (docs/SOUND.md).
+# Installed by TVWallE provision/install.sh.
+set -u
+
+[ "$(id -u)" -eq 0 ] || { echo "Run it as root: sudo tvwalle-sound" >&2; exit 1; }
+uid="$(id -u kiosk 2>/dev/null)" || { echo "There is no kiosk user on this machine." >&2; exit 1; }
+[ -d "/run/user/$uid" ] || { echo "The kiosk isn't running (no session for the kiosk user)." >&2; exit 1; }
+K=(sudo -u kiosk XDG_RUNTIME_DIR="/run/user/$uid")
+
+echo "== Sound cards"
+cat /proc/asound/cards
+
+echo
+echo "== Screens on the display outputs (monitor_present 1 = a screen that takes sound)"
+found=0
+for f in /proc/asound/card*/eld*; do
+  [ -e "$f" ] || continue
+  found=1
+  echo "$f: $(grep -h -E 'monitor_present|eld_valid|monitor_name' "$f" | tr -s ' \t' ' ' | tr '\n' ';')"
+done
+[ "$found" -eq 1 ] || echo "(no display outputs with sound on this machine)"
+
+echo
+echo "== Outputs (* = the one in use)"
+"${K[@]}" wpctl status 2>&1 | sed -n '/^Audio/,/^Video/p' | sed '/^Video/d'
+
+echo "== Card profiles (* = in use)"
+"${K[@]}" pw-dump 2>/dev/null | python3 -c '
+import json, sys
+for o in json.load(sys.stdin):
+    if o.get("type") != "PipeWire:Interface:Device":
+        continue
+    p = o["info"]["props"]; par = o["info"].get("params", {})
+    if p.get("media.class") != "Audio/Device":
+        continue
+    cur = [x.get("name") for x in par.get("Profile", [])]
+    print(o["id"], p.get("device.name"), "|", p.get("device.description"))
+    for x in par.get("EnumProfile", []):
+        print("  ", "*" if x.get("name") in cur else " ", x.get("index"), x.get("name"),
+              "| available:", x.get("available"), "| priority:", x.get("priority"))
+'
+
+[ "${1:-}" = "tones" ] || exit 0
+
+echo
+echo "== A 2-second tone on each output, one after another"
+tone="$(mktemp --suffix=.wav)"
+trap 'rm -f "$tone"' EXIT
+python3 - "$tone" <<'PY'
+import math, struct, sys, wave
+w = wave.open(sys.argv[1], "wb")
+w.setnchannels(2); w.setsampwidth(2); w.setframerate(48000)
+w.writeframes(b"".join(struct.pack("<hh", s, s) for s in
+              (int(9000 * math.sin(2 * math.pi * 440 * i / 48000)) for i in range(96000))))
+PY
+chmod 644 "$tone"
+sinks="$("${K[@]}" pw-dump 2>/dev/null | python3 -c '
+import json, sys
+for o in json.load(sys.stdin):
+    p = o.get("info", {}).get("props", {})
+    if p.get("media.class") == "Audio/Sink":
+        print(o["id"])
+')"
+[ -n "$sinks" ] || echo "(no outputs)"
+for id in $sinks; do
+  echo "Playing on $id: $("${K[@]}" wpctl inspect "$id" | grep -m1 'node.description' | cut -d= -f2)"
+  "${K[@]}" pw-play --target "$id" "$tone"
+  sleep 1
+done
