@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""TVWallE updater: installs a newer signed TVWallE release from GitHub.
+
+A release is three files on GitHub Releases (tools/release.sh makes them):
+  release.json       the version, the git commit and the tarball's SHA-256
+  release.json.sig   an SSH signature of release.json (namespace tvwalle-release)
+  tvwalle.tar.gz     the repo, under tvwalle/, with its VERSION file
+
+The signature is checked against the public key ALREADY on this PC
+(/opt/tvwalle/release/allowed_signers), never against one that came with the
+download, so whoever controls the GitHub repo still can't run code on the TVs
+without the release key. Only a NEWER version is installed.
+
+Installing: the tarball is unpacked next to /opt/tvwalle, the current copy is
+kept as /opt/tvwalle.previous, the new one takes its place, and its setup
+(provision/install.sh) runs. If the setup fails, the previous copy is put back
+and ITS setup runs again.
+
+  tvwalle-update --check            is a newer release out? (any user; JSON with --json)
+  tvwalle-update --apply            check, and install a newer one (root)
+      --trigger nightly             from the nightly restart: leaves alone a PC
+                                    deployed by hand from a Mac (tools/deploy.sh)
+      --trigger first-boot --no-setup
+                                    from the first start: swap the copy only; the
+                                    first-boot script runs the setup itself
+  tvwalle-update --rollback         put /opt/tvwalle.previous back (root, no setup)
+
+Settings (optional), in /etc/tvwalle/update.conf:
+  RELEASES_URL=https://github.com/<owner>/<repo>/releases
+For a fork with its own releases and key, or a test server.
+
+Each install writes its outcome to /var/lib/tvwalle/update-status.json, which
+the web controller shows. Python standard library only. Installed by TVWallE
+provision/install.sh.
+"""
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+DEFAULT_RELEASES_URL = "https://github.com/DoctorInsuranceOne/TVWallE/releases"
+CONFIG = "/etc/tvwalle/update.conf"
+REPO = "/opt/tvwalle"
+PREVIOUS = "/opt/tvwalle.previous"
+INCOMING = "/opt/tvwalle.incoming"
+FAILED = "/opt/tvwalle.failed"
+SIGNERS = os.path.join(REPO, "release", "allowed_signers")
+SIGNER_ID = "tvwalle-release"
+NAMESPACE = "tvwalle-release"
+STATE_DIR = "/var/lib/tvwalle"
+STATUS_FILE = os.path.join(STATE_DIR, "update-status.json")
+DEPLOYED_BY_HAND = os.path.join(STATE_DIR, "deployed-by-hand")
+LOCK_FILE = "/run/tvwalle-update.lock"
+
+TIMEOUT = 30                      # seconds per request
+MAX_MANIFEST = 64 * 1024
+MAX_SIGNATURE = 16 * 1024
+MAX_TARBALL = 100 * 1024 * 1024
+SETUP_TIMEOUT = 45 * 60
+VERSION_RE = re.compile(r"^\d+(?:\.\d+){0,3}$")
+USER_AGENT = "TVWallE-updater"
+
+
+class UpdateError(Exception):
+    """Something the person reading the controller page should be told."""
+
+
+# --- Versions -----------------------------------------------------------------
+
+def parse_version(text):
+    """'1.2' -> (1, 2); anything else -> None."""
+    text = (text or "").strip()
+    if not VERSION_RE.match(text):
+        return None
+    return tuple(int(part) for part in text.split("."))
+
+
+def is_newer(candidate, installed):
+    """installed None (a development copy, or no VERSION file) is older than
+    every release."""
+    c = parse_version(candidate)
+    if c is None:
+        return False
+    if installed is None:
+        return True
+    # Pad so 1.2 == 1.2.0.
+    width = max(len(c), len(installed))
+    return c + (0,) * (width - len(c)) > installed + (0,) * (width - len(installed))
+
+
+def installed_version(repo=REPO):
+    """(release version or None, the VERSION file's text)."""
+    try:
+        with open(os.path.join(repo, "VERSION"), encoding="utf-8") as f:
+            text = f.read().strip()
+    except OSError:
+        return None, ""
+    first = text.splitlines()[0] if text else ""
+    version = parse_version(first)
+    return version, text
+
+
+def format_version(version):
+    return ".".join(str(n) for n in version) if version else None
+
+
+# --- Settings -----------------------------------------------------------------
+
+def releases_url():
+    url = DEFAULT_RELEASES_URL
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("RELEASES_URL="):
+                    value = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if value:
+                        url = value
+    except OSError:
+        pass
+    if not url.startswith(("https://", "http://")):
+        raise UpdateError(f"RELEASES_URL in {CONFIG} must start with https:// (or http:// for a test server).")
+    return url.rstrip("/")
+
+
+# --- Download -----------------------------------------------------------------
+
+def fetch(url, limit, dest=None):
+    """GET url (following GitHub's redirect to its download host). Returns the
+    bytes, or writes them to dest. Refuses anything larger than limit."""
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            size = response.headers.get("Content-Length")
+            if size and size.isdigit() and int(size) > limit:
+                raise UpdateError(f"{url} is too large ({int(size)} bytes).")
+            if dest is None:
+                data = response.read(limit + 1)
+                if len(data) > limit:
+                    raise UpdateError(f"{url} is too large.")
+                return data
+            total = 0
+            with open(dest, "wb") as out:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > limit:
+                        raise UpdateError(f"{url} is too large.")
+                    out.write(chunk)
+            return None
+    except urllib.error.HTTPError as err:
+        if err.code == 404:
+            raise UpdateError(f"Not found on the release server: {url} (no release published yet?)")
+        raise UpdateError(f"The release server answered {err.code} for {url}.")
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        reason = getattr(err, "reason", err)
+        raise UpdateError(f"Can't reach the release server ({reason}). Check the network.")
+
+
+# --- Signature ----------------------------------------------------------------
+
+def verify_signature(data, signature, signers):
+    if not os.path.isfile(signers):
+        raise UpdateError(f"No release key on this PC ({signers}): can't check a release's signature.")
+    with tempfile.TemporaryDirectory(prefix="tvwalle-sig-") as tmp:
+        sig_path = os.path.join(tmp, "release.json.sig")
+        with open(sig_path, "wb") as f:
+            f.write(signature)
+        result = subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", signers, "-I", SIGNER_ID, "-n", NAMESPACE, "-s", sig_path],
+            input=data, capture_output=True, timeout=30)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
+        raise UpdateError("The release's signature doesn't match this PC's release key; not installed. "
+                          + (f"({detail})" if detail else ""))
+
+
+# --- Check --------------------------------------------------------------------
+
+def check(signers=SIGNERS):
+    """Fetch and verify the latest release's manifest. Returns a dict."""
+    base = releases_url()
+    manifest_bytes = fetch(f"{base}/latest/download/release.json", MAX_MANIFEST)
+    signature = fetch(f"{base}/latest/download/release.json.sig", MAX_SIGNATURE)
+    verify_signature(manifest_bytes, signature, signers)
+    try:
+        manifest = json.loads(manifest_bytes)
+    except ValueError:
+        raise UpdateError("The latest release's release.json isn't valid JSON.")
+    version = manifest.get("version")
+    if parse_version(version) is None:
+        raise UpdateError(f"The latest release has no usable version number ({version!r}).")
+    if manifest.get("tag") != f"v{version}":
+        raise UpdateError("The latest release's tag doesn't match its version.")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("sha256", ""))):
+        raise UpdateError("The latest release's release.json has no SHA-256 for its tarball.")
+    installed, text = installed_version()
+    return {
+        "releases_url": base,
+        "installed": format_version(installed),
+        "installed_text": text,
+        "latest": version,
+        "commit": manifest.get("commit"),
+        "released": manifest.get("released"),
+        "newer": is_newer(version, installed),
+        "manifest": manifest,
+    }
+
+
+# --- Status -------------------------------------------------------------------
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def write_status(status):
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = STATUS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(status, f, indent=2)
+            f.write("\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, STATUS_FILE)
+    except OSError as err:
+        print(f"TVWallE: could not write {STATUS_FILE}: {err}", flush=True)
+
+
+def say(text):
+    print(f"TVWallE update: {text}", flush=True)
+
+
+# --- Install ------------------------------------------------------------------
+
+def unpack(tarball, manifest):
+    """Unpack into INCOMING and check it is the release the manifest names."""
+    shutil.rmtree(INCOMING, ignore_errors=True)
+    staging = tempfile.mkdtemp(prefix="tvwalle-unpack-", dir="/opt")
+    try:
+        with tarfile.open(tarball, "r:gz") as tar:
+            for member in tar.getmembers():
+                name = member.name.lstrip("./")
+                if name != "tvwalle" and not name.startswith("tvwalle/"):
+                    raise UpdateError(f"The release's tarball holds {member.name!r}, outside tvwalle/.")
+            # "data": no absolute paths, no links out, no device files or setuid bits.
+            tar.extractall(staging, filter="data")
+        root = os.path.join(staging, "tvwalle")
+        for needed in ("provision/install.sh", "VERSION", "release/allowed_signers"):
+            if not os.path.isfile(os.path.join(root, needed)):
+                raise UpdateError(f"The release has no {needed}.")
+        version, _ = installed_version(root)
+        if format_version(version) != format_version(parse_version(manifest["version"])):
+            raise UpdateError("The release's VERSION doesn't match its release.json.")
+        # Owned by root and writable by root only, like a copy from the USB.
+        for path, dirs, files in os.walk(root):
+            for name in dirs + files:
+                full = os.path.join(path, name)
+                if not os.path.islink(full):
+                    os.chown(full, 0, 0)
+                    os.chmod(full, os.stat(full).st_mode & 0o755)
+        os.chown(root, 0, 0)
+        os.chmod(root, 0o755)
+        os.rename(root, INCOMING)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def swap_in():
+    """/opt/tvwalle -> /opt/tvwalle.previous, INCOMING -> /opt/tvwalle."""
+    shutil.rmtree(PREVIOUS, ignore_errors=True)
+    if os.path.isdir(REPO):
+        os.rename(REPO, PREVIOUS)
+    os.rename(INCOMING, REPO)
+
+
+def swap_back():
+    """The failed copy -> /opt/tvwalle.failed (kept for a look), previous -> /opt/tvwalle."""
+    if not os.path.isdir(PREVIOUS):
+        raise UpdateError("There is no previous copy (/opt/tvwalle.previous) to go back to.")
+    shutil.rmtree(FAILED, ignore_errors=True)
+    if os.path.isdir(REPO):
+        os.rename(REPO, FAILED)
+    os.rename(PREVIOUS, REPO)
+
+
+def run_setup():
+    say("running the setup (provision/install.sh)")
+    try:
+        result = subprocess.run(["bash", os.path.join(REPO, "provision", "install.sh")], timeout=SETUP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
+def read_status():
+    try:
+        with open(STATUS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def apply(trigger, setup, signers):
+    before = read_status()
+    status = {"state": "running", "trigger": trigger, "started_at": now()}
+    # A version whose setup failed here is remembered until a newer one installs.
+    if before.get("failed_version"):
+        status["failed_version"] = before["failed_version"]
+    installed, text = installed_version()
+    status["from"] = format_version(installed) or (text.splitlines()[0] if text else None)
+    if trigger == "nightly" and os.path.exists(DEPLOYED_BY_HAND):
+        say("this PC was deployed by hand from a Mac (tools/deploy.sh); the nightly update leaves it alone.")
+        status.update(state="skipped", finished_at=now(),
+                      message="Deployed by hand from a Mac: the nightly update leaves it alone. Update now still works.")
+        write_status(status)
+        return 0
+    write_status(status)
+    try:
+        info = check(signers)
+        status["latest"] = info["latest"]
+        if not info["newer"]:
+            say(f"up to date ({info['installed'] or 'development copy'}; latest release {info['latest']}).")
+            status.update(state="up_to_date", finished_at=now(),
+                          message=f"Up to date. The latest release is {info['latest']}.")
+            write_status(status)
+            return 0
+        # A version whose setup already failed here (and was rolled back) isn't
+        # retried every night; "Update now" still tries it.
+        if trigger == "nightly" and status.get("failed_version") == info["latest"]:
+            say(f"{info['latest']} failed here before and was rolled back; not trying it again tonight.")
+            status.update(state="skipped", finished_at=now(),
+                          message=f"{info['latest']} failed here before and was rolled back, so the nightly "
+                                  f"update doesn't retry it. Update now still tries it.")
+            write_status(status)
+            return 0
+        manifest = info["manifest"]
+        say(f"installing {manifest['version']} (installed: {info['installed'] or 'development copy'})")
+        with tempfile.TemporaryDirectory(prefix="tvwalle-dl-") as tmp:
+            tarball = os.path.join(tmp, "tvwalle.tar.gz")
+            fetch(f"{info['releases_url']}/download/{manifest['tag']}/tvwalle.tar.gz", MAX_TARBALL, tarball)
+            digest = hashlib.sha256()
+            with open(tarball, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != manifest["sha256"]:
+                raise UpdateError("The downloaded tarball doesn't match the signed release.json; not installed.")
+            unpack(tarball, manifest)
+    except UpdateError as err:
+        say(str(err))
+        shutil.rmtree(INCOMING, ignore_errors=True)
+        status.update(state="failed", finished_at=now(), message=str(err))
+        write_status(status)
+        return 1
+
+    swap_in()
+    status["to"] = manifest["version"]
+    if not setup:
+        say(f"{manifest['version']} is in place; the first-boot setup runs it.")
+        status.pop("failed_version", None)
+        status.update(state="installed", finished_at=now(),
+                      message=f"Installed {manifest['version']} (the first start ran its setup).")
+        write_status(status)
+        return 0
+    if run_setup():
+        try:
+            os.remove(DEPLOYED_BY_HAND)
+        except OSError:
+            pass
+        say(f"installed {manifest['version']}.")
+        status.pop("failed_version", None)
+        status.update(state="installed", finished_at=now(), message=f"Installed {manifest['version']}.")
+        write_status(status)
+        return 0
+
+    say(f"the setup of {manifest['version']} failed; going back to the previous copy.")
+    swap_back()
+    restored = run_setup()
+    status.update(state="rolled_back", failed_version=manifest["version"], finished_at=now(),
+                  message=(f"The setup of {manifest['version']} failed, so the previous version was put back"
+                           + ("." if restored else ", and ITS setup failed too: look at the PC.")
+                           + " The failed copy is in /opt/tvwalle.failed."))
+    write_status(status)
+    return 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TVWallE updater (signed releases from GitHub)")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true", help="is a newer release out?")
+    mode.add_argument("--apply", action="store_true", help="install a newer release (root)")
+    mode.add_argument("--rollback", action="store_true", help="put /opt/tvwalle.previous back (root, no setup)")
+    parser.add_argument("--json", action="store_true", help="with --check: print JSON")
+    parser.add_argument("--trigger", default="manual", choices=["manual", "controller", "nightly", "first-boot"])
+    parser.add_argument("--no-setup", action="store_true", help="with --apply: swap the copy, don't run the setup")
+    parser.add_argument("--signers", default=SIGNERS,
+                        help="release key file (default: the one in /opt/tvwalle; a PC set up before the "
+                             "updater existed is given the one from the downloaded release, once)")
+    args = parser.parse_args()
+
+    if args.check:
+        try:
+            info = check(args.signers)
+            info.pop("manifest", None)
+            info["ok"] = True
+        except UpdateError as err:
+            installed, text = installed_version()
+            info = {"ok": False, "error": str(err), "installed": format_version(installed), "installed_text": text}
+        if args.json:
+            print(json.dumps(info))
+        elif info["ok"]:
+            print(f"Installed: {info['installed'] or 'development copy'}; latest release: {info['latest']}"
+                  + (" (newer)" if info["newer"] else " (up to date)"))
+        else:
+            print(info["error"], file=sys.stderr)
+        return 0 if info["ok"] else 1
+
+    if os.geteuid() != 0:
+        print("Run it as root: sudo tvwalle-update ...", file=sys.stderr)
+        return 1
+    with open(LOCK_FILE, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            say("another update is already running.")
+            return 1
+        if args.rollback:
+            failed, _ = installed_version()
+            try:
+                swap_back()
+            except UpdateError as err:
+                say(str(err))
+                return 1
+            say("the previous copy is back in /opt/tvwalle.")
+            # Remembered, so the nightly update doesn't try that version again.
+            status = read_status()
+            if failed:
+                status["failed_version"] = format_version(failed)
+            status.update(state="rolled_back", trigger=args.trigger, finished_at=now(),
+                          message=(f"The setup of {format_version(failed) or 'the new version'} failed, so the "
+                                   "previous copy was put back. The failed copy is in /opt/tvwalle.failed."))
+            write_status(status)
+            return 0
+        return apply(args.trigger, not args.no_setup, args.signers)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

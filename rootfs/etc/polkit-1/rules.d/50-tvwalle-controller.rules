@@ -1,0 +1,16 @@
+// TVWallE: the web controller (user tvwalle-ctl) may restart the kiosk and
+// start an update, and nothing else. Installed by TVWallE provision/install.sh.
+polkit.addRule(function (action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units" || subject.user !== "tvwalle-ctl") {
+    return polkit.Result.NOT_HANDLED;
+  }
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (unit === "tvwalle-kiosk.service" && verb === "restart") {
+    return polkit.Result.YES;
+  }
+  if (unit === "tvwalle-update.service" && verb === "start") {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});

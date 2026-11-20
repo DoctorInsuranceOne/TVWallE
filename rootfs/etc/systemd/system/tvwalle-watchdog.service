@@ -1,0 +1,22 @@
+# TVWallE watchdog: one check that Firefox still answers; three missed checks
+# in a row restart the browser. Run every minute by tvwalle-watchdog.timer.
+# Installed by TVWallE provision/install.sh.
+#
+# Runs as the web controller's user: the polkit rule that lets the controller
+# restart the kiosk covers this too, so no root is needed.
+[Unit]
+Description=TVWallE watchdog (restart the browser if Firefox stops answering)
+
+[Service]
+Type=oneshot
+User=tvwalle-ctl
+Group=tvwalle-ctl
+StateDirectory=tvwalle
+StateDirectoryMode=0755
+ExecStart=/usr/bin/python3 /usr/local/lib/tvwalle/controller.py --watchdog
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

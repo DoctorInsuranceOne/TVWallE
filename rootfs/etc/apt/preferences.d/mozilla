@@ -1,0 +1,6 @@
+# Installed by TVWallE provision/install.sh.
+# Packages from Mozilla's repository win over Ubuntu's. Ubuntu's own
+# "firefox" package only installs the snap, which a kiosk must not use.
+Package: *
+Pin: origin packages.mozilla.org
+Pin-Priority: 1000

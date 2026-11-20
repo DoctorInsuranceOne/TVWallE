@@ -1,0 +1,62 @@
+# TVWallE: how Ubuntu's installer sets up a TVWallE PC (Ubuntu autoinstall).
+#
+# tools/build-installer.sh fills in the @...@ values and puts the result at the
+# root of the USB as /autoinstall.yaml. Because the file is on the USB itself,
+# and the boot line carries no "autoinstall", the installer asks
+# "Continue with autoinstall?" once before it erases anything.
+#
+# Reference: https://canonical-subiquity.readthedocs-hosted.com/en/latest/reference/autoinstall-reference.html
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: America/New_York
+  # "Ubuntu Server", not the minimized one: the same base as the dev VM.
+  source:
+    id: ubuntu-server
+  network:
+    version: 2
+    ethernets:
+      wired:
+        match:
+          name: "en*"
+        dhcp4: true
+        optional: true
+    # tvwalle-wifi-begin: removed by the build when no Wi-Fi was given, and by
+    # installer/early when the PC has no Wi-Fi card. Ubuntu's network setup
+    # takes a Wi-Fi card only by its exact name, so installer/early puts this
+    # PC's card name in place of TVWALLE_WIFI_IF.
+    wifis:
+      TVWALLE_WIFI_IF:
+        dhcp4: true
+        optional: true
+        access-points:
+          @WIFI_SSID@:
+            password: @WIFI_PASSWORD@
+    # tvwalle-wifi-end
+  # The whole disk (the largest one; the USB itself is never a candidate).
+  storage:
+    layout:
+      name: direct
+  identity:
+    hostname: tvwalle
+    username: tvadmin
+    realname: TVWallE admin
+    password: @ADMIN_PASSWORD_HASH@
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - @SSH_AUTHORIZED_KEY@
+  # wpasupplicant when there is Wi-Fi (it is on the USB, so no network needed).
+  packages: @PACKAGES@
+  # Without a network the installer still installs everything from the USB.
+  apt:
+    fallback: offline-install
+  early-commands:
+    - python3 /cdrom/tvwalle/installer/early
+  late-commands:
+    - sh /cdrom/tvwalle/installer/late
+  # Off, not restart: take the USB out, then switch the PC on.
+  shutdown: poweroff

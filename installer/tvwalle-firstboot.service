@@ -1,0 +1,23 @@
+# TVWallE first-boot setup, on a PC installed from the TVWallE USB.
+# Installed and turned on by installer/late; installer/firstboot turns it off
+# once the setup has finished. Until then it runs again at every start.
+
+[Unit]
+Description=TVWallE first-boot setup
+# cloud-init creates tvadmin and its SSH key in cloud-init-network; the setup
+# looks for that key before it turns SSH passwords off. (Not after all of
+# cloud-init: its last step waits for the boot to finish, i.e. for this.)
+After=cloud-init-network.service network.target
+# The login prompt waits, so the progress printed on the screen stays readable.
+Before=getty@tty1.service
+ConditionPathExists=!/var/lib/tvwalle/firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/tvwalle/installer/firstboot
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

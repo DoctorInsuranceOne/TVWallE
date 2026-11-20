@@ -1,0 +1,85 @@
+:root {
+  --bg: #0d1520;
+  --card: #152131;
+  --line: #24344a;
+  --text: #e8eef6;
+  --muted: #8ea0b6;
+  --accent: #f28c28;
+  --accent-text: #1a1206;
+  --error: #ff8a80;
+  --ok: #8fd694;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+header { margin-bottom: 20px; }
+h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.02em; }
+h2 { margin: 0 0 8px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 0 16px;
+}
+
+.muted { color: var(--muted); font-size: 0.9rem; margin: 6px 0 0; }
+.title { margin: 0; font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
+.url { margin: 4px 0 0; color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem; overflow-wrap: anywhere; }
+.note code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
+
+label { display: block; font-weight: 600; margin-bottom: 8px; }
+
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; min-width: 0; }
+
+input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: wait; }
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button.link { background: none; color: var(--muted); padding: 0; margin-top: 12px; font-weight: 400; text-decoration: underline; }
+
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.actions button { padding: 14px; }
+.actions.tight { margin: 12px 0 0; }
+.actions.tight button { padding: 10px; }
+
+.footer { text-align: right; margin: 0; }
+
+#message { min-height: 1.5em; margin: 8px 0 0; }
+#message.ok { color: var(--ok); }
+#message.error { color: var(--error); }

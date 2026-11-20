@@ -1,0 +1,51 @@
+# TVWallE kiosk: Firefox ESR full screen inside sway (configured as a kiosk),
+# on tty1, as the kiosk user.
+# Installed by TVWallE provision/install.sh.
+#
+# systemd opens a real login session for the kiosk user (PAMName, TTYPath), so
+# logind gives it the screen, keyboard and sound without a display manager.
+# When Firefox exits or crashes, sway exits too (see sway-kiosk.conf) and
+# systemd starts both again.
+
+[Unit]
+Description=TVWallE kiosk (Firefox ESR in sway on tty1)
+After=systemd-user-sessions.service
+# The kiosk takes tty1 instead of the text login.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+# The boot splash hands over to the kiosk the way a display manager's does:
+# plymouth-quit.service (which clears the screen to text) never runs; the
+# kiosk takes the screen with the logo still on it (ExecStartPre/Post). If the
+# kiosk fails, plymouth-quit runs after all, so the console is reachable.
+Conflicts=plymouth-quit.service
+After=plymouth-quit.service plymouth-start.service
+OnFailure=plymouth-quit.service
+# No wait for the network: the start page (kiosk-session) waits for it, with
+# the logo up and a message, instead of a silent boot screen.
+
+[Service]
+User=kiosk
+PAMName=tvwalle-kiosk
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+# Plymouth lets go of the screen but leaves the logo on it; sway draws the same
+# logo as its background. "+": as root; "-": no splash running is fine.
+ExecStartPre=-+/usr/bin/plymouth deactivate
+ExecStart=/usr/bin/sway --config /usr/local/share/tvwalle/sway-kiosk.conf
+ExecStartPost=-+/usr/bin/plymouth quit --retain-splash
+# logind runs the session's processes outside this service, so stopping it
+# only ends sway. End Firefox too (as root: "+"; no Firefox is fine: "-").
+ExecStopPost=-+/usr/bin/pkill -TERM -u kiosk -x "firefox(-bin|-esr)?"
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

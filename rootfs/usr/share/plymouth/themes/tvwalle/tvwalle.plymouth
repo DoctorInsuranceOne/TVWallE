@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=TVWallE
+Description=The Doctor Insurance One logo on black. Installed by TVWallE provision/install.sh.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/tvwalle
+ScriptFile=/usr/share/plymouth/themes/tvwalle/tvwalle.script

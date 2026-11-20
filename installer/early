@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""TVWallE installer, early step (autoinstall early-commands).
+
+Runs before the installer touches the disk. Ubuntu's network setup takes a
+Wi-Fi card only by its exact name (wlp2s0, wlo1, ...), which differs from PC
+to PC, so this puts this PC's card name into /autoinstall.yaml in place of
+TVWALLE_WIFI_IF, or removes the Wi-Fi part when the PC has no Wi-Fi card. The
+installer reads /autoinstall.yaml again after this step.
+
+It edits the YAML structure (the installer environment has PyYAML), so it
+works however the installer laid the file out. Prints no password.
+"""
+import glob
+import os
+import time
+
+import yaml
+
+CONFIG = "/autoinstall.yaml"
+PLACEHOLDER = "TVWALLE_WIFI_IF"
+
+
+def wifi_card():
+    # A Wi-Fi card can show up a few seconds after the others (firmware loads).
+    for _ in range(5):
+        for dev in sorted(glob.glob("/sys/class/net/*")):
+            if os.path.isdir(os.path.join(dev, "wireless")) or os.path.exists(os.path.join(dev, "phy80211")):
+                return os.path.basename(dev)
+        time.sleep(2)
+    return None
+
+
+def main():
+    with open(CONFIG, encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+    config = doc.get("autoinstall", doc)
+    network = config.get("network") or {}
+    if "network" in network:  # the older nested form
+        network = network["network"]
+    wifis = network.get("wifis") or {}
+    if PLACEHOLDER not in wifis:
+        return
+
+    card = wifi_card()
+    if card:
+        network["wifis"] = {card: wifis[PLACEHOLDER]}
+        print(f"TVWallE: Wi-Fi card {card}")
+    else:
+        del network["wifis"]
+        print("TVWallE: this PC has no Wi-Fi card; wired network only")
+
+    with open(CONFIG, "w", encoding="utf-8") as f:
+        yaml.safe_dump(doc, f, sort_keys=False, allow_unicode=True)
+
+
+if __name__ == "__main__":
+    main()

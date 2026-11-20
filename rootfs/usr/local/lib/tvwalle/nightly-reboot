@@ -1,0 +1,31 @@
+#!/bin/sh
+# TVWallE: restarts the PC at night (tvwalle-reboot.service, 4:00 AM), but
+# never in the middle of an update: it waits up to 30 minutes for apt and
+# dpkg to finish, and skips tonight's restart if they don't. Before the
+# restart, TVWallE installs a newer signed release from GitHub if there is one
+# (docs/UPDATES.md); whatever that does, the PC restarts.
+# Installed by TVWallE provision/install.sh.
+set -u
+
+busy() {
+  # is-active is true when ANY of the units is active.
+  systemctl is-active --quiet apt-daily-upgrade.service apt-daily.service \
+    || fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1
+}
+
+tries=0
+while busy; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 180 ]; then
+    echo "TVWallE: updates still running after 30 minutes; no restart tonight."
+    exit 0
+  fi
+  sleep 10
+done
+
+# Its own timeouts (downloads, and the setup it runs) keep this bounded.
+/usr/bin/python3 /usr/local/lib/tvwalle/tvwalle-update --apply --trigger nightly \
+  || echo "TVWallE: no update installed tonight (see above); restarting anyway."
+
+echo "TVWallE: nightly restart."
+systemctl reboot

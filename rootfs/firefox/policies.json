@@ -1,0 +1,40 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisableProfileImport": true,
+    "DisableSetDesktopBackground": true,
+    "DontCheckDefaultBrowser": true,
+    "NoDefaultBookmarks": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "PasswordManagerEnabled": false,
+    "OfferToSaveLogins": false,
+    "AutofillAddressEnabled": false,
+    "AutofillCreditCardEnabled": false,
+    "UserMessaging": {
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false,
+      "Locked": true
+    },
+    "Permissions": {
+      "Autoplay": { "Default": "allow-audio-video", "Locked": true },
+      "Notifications": { "BlockNewRequests": true, "Locked": true },
+      "Location": { "BlockNewRequests": true, "Locked": true },
+      "Camera": { "BlockNewRequests": true, "Locked": true },
+      "Microphone": { "BlockNewRequests": true, "Locked": true }
+    },
+    "Preferences": {
+      "browser.sessionstore.resume_from_crash": { "Value": false, "Status": "locked" },
+      "browser.startup.couldRestoreSession.count": { "Value": -1, "Status": "locked" },
+      "browser.crashReports.unsubmittedCheck.enabled": { "Value": false, "Status": "locked" },
+      "browser.translations.automaticallyPopup": { "Value": false, "Status": "locked" },
+      "browser.tabs.warnOnClose": { "Value": false, "Status": "locked" },
+      "datareporting.policy.dataSubmissionPolicyBypassNotification": { "Value": true, "Status": "locked" }
+    }
+  }
+}

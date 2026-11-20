@@ -1,0 +1,28 @@
+// TVWallE automatic updates. Installed by TVWallE provision/install.sh.
+// Read after 50unattended-upgrades; the lists here ADD to its own (Ubuntu's
+// security updates stay on).
+
+// Ubuntu's regular (tested) updates too, not only security fixes: nobody runs
+// "apt upgrade" on a TV, so without this the 47 bug-fix updates waiting on the
+// VM (2026-11-19) would never install.
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-updates";
+};
+
+// Firefox ESR comes from Mozilla's repository: let it update on its own too.
+Unattended-Upgrade::Origins-Pattern {
+    "site=packages.mozilla.org";
+};
+
+// The PC restarts every night at 4:00 AM (tvwalle-reboot.timer), after the
+// 3:30 AM updates; unattended-upgrades itself never restarts it.
+Unattended-Upgrade::Automatic-Reboot "false";
+
+// Keep TVWallE's edited config files (e.g. /etc/plymouth/plymouthd.conf, which
+// belongs to the plymouth package) when a package ships a new default.
+// Without this, unattended-upgrades skips any package whose config file was
+// changed, and Plymouth would never get an update.
+Dpkg::Options {
+    "--force-confdef";
+    "--force-confold";
+};

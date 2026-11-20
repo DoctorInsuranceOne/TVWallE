@@ -1,0 +1,4 @@
+# TVWallE release key (public half). Kiosks install only releases whose
+# release.json is signed by this key (docs/UPDATES.md). The private half is on
+# the Mac that publishes releases, never in this repo.
+tvwalle-release namespaces="tvwalle-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICXJ5tadMDa+QP+Bz7E2m9yKqC5J4jTnBi7wbm3RSTSG

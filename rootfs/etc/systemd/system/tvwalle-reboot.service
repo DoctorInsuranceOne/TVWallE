@@ -1,0 +1,8 @@
+# TVWallE nightly restart, started by tvwalle-reboot.timer.
+# Installed by TVWallE provision/install.sh.
+[Unit]
+Description=TVWallE nightly restart (waits for any update in progress)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/tvwalle/nightly-reboot

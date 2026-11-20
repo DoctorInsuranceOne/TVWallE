@@ -1,0 +1,5 @@
+# Installed by TVWallE provision/install.sh.
+# TVWallE removes snapd (nothing on the kiosk is a snap); never install it again.
+Package: snapd
+Pin: release a=*
+Pin-Priority: -10

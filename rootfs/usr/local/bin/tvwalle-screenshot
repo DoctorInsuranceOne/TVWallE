@@ -1,0 +1,15 @@
+#!/bin/sh
+# TVWallE: saves a screenshot of what the kiosk screen shows right now.
+#   sudo tvwalle-screenshot [file.png]        (default /tmp/kiosk.png)
+# Installed by TVWallE provision/install.sh.
+set -eu
+
+out="${1:-/tmp/kiosk.png}"
+run="/run/user/$(id -u kiosk)"
+
+# The kiosk's display socket (wayland-0, wayland-1, ...).
+sock="$(ls "$run" 2>/dev/null | grep -E '^wayland-[0-9]+$' | head -n 1 || true)"
+[ -n "$sock" ] || { echo "The kiosk screen is not running." >&2; exit 1; }
+
+runuser -u kiosk -- env XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY="$sock" grim - > "$out"
+echo "$out"

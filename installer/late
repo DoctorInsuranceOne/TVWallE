@@ -1,0 +1,23 @@
+#!/bin/sh
+# TVWallE installer, late step (autoinstall late-commands), run once Ubuntu is
+# installed (the new system is mounted at /target). Copies TVWallE from the USB
+# to /opt/tvwalle and turns on the first-boot setup, which finishes the job
+# when the PC starts (installer/firstboot).
+set -eu
+src=/cdrom/tvwalle
+dst=/target/opt/tvwalle
+
+rm -rf "$dst"
+cp -a "$src" "$dst"
+chown -R root:root "$dst"
+chmod -R u+w,go-w "$dst"
+# The controller password hash: root only until the first boot puts it in place.
+if [ -d "$dst/seed" ]; then
+  chmod 0700 "$dst/seed"
+  chmod 0600 "$dst/seed"/*
+fi
+
+install -m 0644 "$dst/installer/tvwalle-firstboot.service" /target/etc/systemd/system/tvwalle-firstboot.service
+systemctl --root=/target enable tvwalle-firstboot.service
+
+echo "TVWallE: copied to /opt/tvwalle ($(cat "$dst/VERSION" 2>/dev/null || echo 'no version')); first-boot setup turned on"

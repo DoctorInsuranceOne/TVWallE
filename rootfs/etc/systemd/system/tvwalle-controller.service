@@ -1,0 +1,39 @@
+# TVWallE web controller: refresh the TV's page, open another page, restart
+# the browser. Port 8080. Installed by TVWallE provision/install.sh.
+#
+# It runs as its own user with no way to gain privileges. The one privileged
+# thing it does, restarting tvwalle-kiosk.service, is granted by a polkit rule
+# (/etc/polkit-1/rules.d/50-tvwalle-controller.rules).
+
+[Unit]
+Description=TVWallE web controller (port 8080)
+After=network.target
+
+[Service]
+User=tvwalle-ctl
+Group=tvwalle-ctl
+ExecStart=/usr/bin/python3 /usr/local/lib/tvwalle/controller.py
+Restart=on-failure
+RestartSec=2
+# /var/lib/tvwalle: the URL opened from the controller (read by the kiosk).
+StateDirectory=tvwalle
+StateDirectoryMode=0755
+Environment=PYTHONUNBUFFERED=1
+
+# Lock it down: it only needs its state folder, the network, and D-Bus (for
+# systemctl).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

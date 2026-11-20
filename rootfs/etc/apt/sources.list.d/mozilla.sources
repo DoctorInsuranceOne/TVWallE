@@ -1,0 +1,6 @@
+# Mozilla's own APT repository (Firefox ESR). Installed by TVWallE provision/install.sh.
+Types: deb
+URIs: https://packages.mozilla.org/apt
+Suites: mozilla
+Components: main
+Signed-By: /etc/apt/keyrings/packages.mozilla.org.asc

@@ -1,0 +1,6 @@
+# TVWallE: admins (group sudo) use sudo without a password.
+# Installed by TVWallE provision/install.sh.
+#
+# SSH accepts keys only (sshd_config.d/10-tvwalle.conf), so the admin's key is
+# the credential; this lets tools/deploy.sh run the setup unattended.
+%sudo ALL=(ALL:ALL) NOPASSWD: ALL

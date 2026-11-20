@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>TVWallE</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>TVWallE</h1>
+    <p id="host" class="muted">Connecting…</p>
+  </header>
+
+  <section id="login" hidden>
+    <form id="login-form" class="card">
+      <label for="password">Password</label>
+      <div class="row">
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Sign in</button>
+      </div>
+    </form>
+    <p id="no-password" class="card note" hidden>
+      No password is set yet. On the kiosk, run <code>sudo tvwalle-passwd</code>, then reload this page.
+    </p>
+  </section>
+
+  <section id="control" hidden>
+    <div class="card">
+      <h2>On the screen now</h2>
+      <p id="now-title" class="title"></p>
+      <p id="now-url" class="url"></p>
+      <p id="kept" class="muted"></p>
+    </div>
+
+    <div class="actions">
+      <button id="refresh" type="button">Refresh page</button>
+      <button id="restart" type="button" class="secondary">Restart browser</button>
+    </div>
+
+    <form id="open-form" class="card">
+      <label for="url">Open a page</label>
+      <div class="row">
+        <input id="url" type="url" required placeholder="https://…" spellcheck="false" autocomplete="off">
+        <button type="submit">Open</button>
+      </div>
+      <p class="muted">The kiosk keeps the page you open, even after a restart.</p>
+      <button id="reset" type="button" class="link">Back to the default page</button>
+    </form>
+
+    <div class="card">
+      <h2>Software</h2>
+      <p id="sw-version" class="title"></p>
+      <p id="sw-by-hand" class="muted" hidden></p>
+      <p id="sw-last" class="muted"></p>
+      <p id="sw-check" class="muted" hidden></p>
+      <div class="actions tight">
+        <button id="update-check" type="button" class="secondary">Check for updates</button>
+        <button id="update-start" type="button">Update now</button>
+      </div>
+      <p class="muted">The kiosk also updates itself every night, just before its 4:00 AM restart.
+        It installs only releases signed with the TVWallE release key.</p>
+    </div>
+
+    <p class="footer"><button id="logout" type="button" class="link">Sign out</button></p>
+  </section>
+
+  <p id="message" role="status" aria-live="polite"></p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

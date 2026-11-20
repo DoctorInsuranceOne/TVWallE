@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# TVWallE first-boot setup, run by tvwalle-firstboot.service on a PC installed
+# from the TVWallE USB. It names the PC, waits for the network, installs the
+# latest signed TVWallE release from GitHub when it is newer than the copy on
+# the USB (else keeps the USB's), runs the setup script (provision/install.sh),
+# puts the controller password from the USB in place, and restarts into the
+# kiosk.
+#
+# Until it has finished it runs again at every start; then it turns itself off.
+# Progress shows on the PC's screen and in: journalctl -u tvwalle-firstboot
+set -uo pipefail
+
+REPO=/opt/tvwalle
+DONE=/var/lib/tvwalle/firstboot-done
+# The USB's secrets, moved out of the copy first: an update replaces the copy.
+SEED_DIR=/var/lib/tvwalle-seed
+SEED="$SEED_DIR/controller-password"
+UPDATED=0
+PASSWORD_FILE=/etc/tvwalle/controller-password
+ATTEMPTS=5
+
+say() { printf '\n[TVWallE] %s\n' "$*"; }
+
+# tvwalle-<last 4 hex digits of the network card's address>, so each TV's PC
+# can be told apart on the network. Wired card first, else Wi-Fi.
+name_this_pc() {
+  [ "$(hostname)" = "tvwalle" ] || return 0   # already named on an earlier try
+  local dev mac=""
+  for dev in /sys/class/net/en* /sys/class/net/wl*; do
+    [ -e "$dev/device" ] || continue
+    mac="$(cat "$dev/address")"
+    break
+  done
+  if [ -z "$mac" ]; then
+    say "No network card found; keeping the name tvwalle."
+    return 0
+  fi
+  mac="${mac//:/}"
+  local name="tvwalle-${mac: -4}"
+  hostnamectl set-hostname "$name"
+  if grep -q '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+    sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1 $name/" /etc/hosts
+  else
+    printf '127.0.1.1 %s\n' "$name" >> /etc/hosts
+  fi
+  say "This PC is now called $name."
+}
+
+# The setup downloads Firefox ESR from Mozilla and packages from Ubuntu.
+wait_for_network() {
+  local tries=0
+  until curl -fsS -o /dev/null --max-time 10 https://packages.mozilla.org/apt/repo-signing-key.gpg 2>/dev/null; do
+    if [ $((tries % 4)) -eq 0 ]; then
+      say "Waiting for the Internet (checking every 15 seconds). Check the network cable or the Wi-Fi."
+    fi
+    tries=$((tries + 1))
+    sleep 15
+  done
+  say "Connected: $(hostname -I | awk '{ print $1 }')"
+}
+
+# What the USB brought (seed/: the controller password's hash) moves out of
+# /opt/tvwalle before an update can swap that folder away.
+keep_seed() {
+  if [ -d "$REPO/seed" ]; then
+    rm -rf "$SEED_DIR"
+    mv "$REPO/seed" "$SEED_DIR"
+    chown -R root:root "$SEED_DIR"
+    chmod 0700 "$SEED_DIR"
+  fi
+}
+
+# A newer signed release from GitHub replaces the USB's copy; without one (or
+# without GitHub) the USB's copy is used. Run with the USB's own updater.
+update_from_github() {
+  local updater="$REPO/rootfs/usr/local/lib/tvwalle/tvwalle-update"
+  [ -f "$updater" ] || return 0
+  say "Looking for a newer TVWallE release on GitHub."
+  local before
+  before="$(head -n 1 "$REPO/VERSION" 2>/dev/null)"
+  if python3 "$updater" --apply --trigger first-boot --no-setup; then
+    if [ "$(head -n 1 "$REPO/VERSION" 2>/dev/null)" != "$before" ]; then
+      UPDATED=1
+      say "Installing TVWallE $(head -n 1 "$REPO/VERSION") from GitHub."
+    else
+      say "The USB's TVWallE is the latest; using it."
+    fi
+  else
+    say "No update from GitHub (see above); using the USB's copy."
+  fi
+}
+
+run_setup() {
+  local attempt
+  for attempt in $(seq 1 "$ATTEMPTS"); do
+    say "Setting up the kiosk (try $attempt of $ATTEMPTS). This takes several minutes."
+    if bash "$REPO/provision/install.sh"; then
+      return 0
+    fi
+    if [ "$attempt" -lt "$ATTEMPTS" ]; then
+      say "The setup stopped with an error. Trying again in a minute."
+      sleep 60
+    fi
+  done
+  return 1
+}
+
+# The hash typed when the USB was built. A password already set on this PC
+# (sudo tvwalle-passwd) is kept.
+install_controller_password() {
+  if [ -s "$SEED" ] && [ ! -s "$PASSWORD_FILE" ]; then
+    install -o root -g tvwalle-ctl -m 0640 "$SEED" "$PASSWORD_FILE"
+    say "Controller password set (the one typed when the USB was built)."
+  fi
+  rm -rf "$SEED_DIR"
+}
+
+main() {
+  say "First-boot setup, TVWallE $(head -n 1 "$REPO/VERSION" 2>/dev/null || echo '(no version)')"
+  keep_seed
+  name_this_pc
+  wait_for_network
+  update_from_github
+  local ok=0
+  if run_setup; then
+    ok=1
+  elif [ "$UPDATED" -eq 1 ]; then
+    say "The setup of the release from GitHub failed; going back to the USB's copy."
+    if python3 "$REPO/rootfs/usr/local/lib/tvwalle/tvwalle-update" --rollback --trigger first-boot && run_setup; then
+      ok=1
+    fi
+  fi
+  if [ "$ok" -eq 0 ]; then
+    say "The setup did not finish. It tries again at the next start."
+    say "Log in here as tvadmin, or over SSH, and see:  journalctl -u tvwalle-firstboot -b"
+    say "Try again now:  sudo systemctl restart tvwalle-firstboot"
+    exit 1
+  fi
+  install_controller_password
+  mkdir -p "$(dirname "$DONE")"
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$DONE"
+  systemctl disable tvwalle-firstboot.service
+  say "Done. Restarting into the kiosk."
+  systemctl --no-block reboot
+}
+
+main "$@"

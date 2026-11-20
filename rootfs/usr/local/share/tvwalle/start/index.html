@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  TVWallE start page. Installed by TVWallE provision/install.sh.
+
+  kiosk-session opens Firefox on this file with the real page after the #:
+    file:///usr/local/share/tvwalle/start/index.html#https://crm.az.diofl.net/#/tv
+  It shows the logo exactly where the boot splash had it (40% of the width,
+  centred, on black), checks the page's server can be reached, then replaces
+  itself with the page. Without network it stays, says so, and keeps trying.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Starting…</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  img {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 40vw; height: auto; display: block;
+  }
+  #wait {
+    position: fixed; left: 0; right: 0;
+    /* just below the logo: its height is 40vw * 512/1329 */
+    top: calc(50% + 7.7vw + 3vh);
+    margin: 0; text-align: center;
+    font: 1.6vw/1.4 system-ui, "Noto Sans", sans-serif; color: #8ea0b6;
+  }
+</style>
+</head>
+<body>
+<img src="logo.png" alt="Doctor Insurance One">
+<p id="wait" hidden></p>
+<script>
+  "use strict";
+  const target = location.hash.slice(1);
+  const wait = document.getElementById("wait");
+  const started = Date.now();
+
+  function say(text) {
+    wait.textContent = text;
+    wait.hidden = false;
+  }
+
+  // Any answer at all from the server means the network works; "no-cors"
+  // gives an opaque answer that is enough to know that.
+  async function reachable(url) {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 8000);
+    try {
+      await fetch(url, { mode: "no-cors", cache: "no-store", signal: stop.signal });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function go() {
+    if (await reachable(target)) {
+      location.replace(target);
+      return;
+    }
+    say(Date.now() - started > 60000
+      ? "Still waiting for the network. Check the cable or Wi-Fi."
+      : "Waiting for the network…");
+    setTimeout(go, 3000);
+  }
+
+  if (/^https?:\/\//.test(target)) {
+    go();
+  } else {
+    say("No page to open. Set one from the TVWallE controller.");
+  }
+</script>
+</body>
+</html>

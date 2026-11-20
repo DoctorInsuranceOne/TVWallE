@@ -1,0 +1,82 @@
+#!/bin/sh
+# TVWallE: runs inside sway as the kiosk user (started by sway-kiosk.conf) and
+# opens Firefox ESR full screen on the configured page. When Firefox exits,
+# this ends sway, and systemd starts both again.
+# Installed by TVWallE provision/install.sh.
+set -eu
+
+CONF=/etc/tvwalle/kiosk.conf
+SAVED=/var/lib/tvwalle/url
+DEFAULT_URL='https://crm.az.diofl.net/#/tv'
+
+# Which page: the one opened from the web controller (it saves it), else
+# KIOSK_URL from kiosk.conf, else the TV dashboard.
+url=''
+if [ -r "$SAVED" ]; then
+  url="$(head -n 1 "$SAVED")"
+fi
+if [ -z "$url" ] && [ -r "$CONF" ]; then
+  # Read KIOSK_URL=... without running the file as shell code.
+  url="$(awk -F= '/^KIOSK_URL=/ { sub(/^KIOSK_URL=/, ""); u = $0 } END { print u }' "$CONF")"
+fi
+[ -n "$url" ] || url="$DEFAULT_URL"
+
+# One fixed profile that survives reboots: the TV dashboard keeps its pairing
+# key in this profile's localStorage. A new profile pairs as a new TV.
+profile="$HOME/firefox-profile"
+mkdir -p "$profile"
+
+# The previous session's Firefox can still be shutting down: logind keeps the
+# session's processes outside the service, so a restart doesn't wait for them.
+# A second Firefox on the same profile would hand its page to the old one and
+# exit (or worse, damage the profile that holds the pairing key). Wait up to
+# 10 seconds for it, then end it.
+me="$(id -u)"
+tries=0
+while pgrep -u "$me" -x 'firefox(-bin|-esr)?' >/dev/null; do
+  if [ "$tries" -ge 20 ]; then
+    pkill -KILL -u "$me" -x 'firefox(-bin|-esr)?' || true
+    sleep 1
+    break
+  fi
+  sleep 0.5
+  tries=$((tries + 1))
+done
+
+# A crash can leave the profile's lock behind, and Firefox then refuses to
+# start. No other Firefox runs as this user now, so a lock here is stale.
+rm -f "$profile/lock" "$profile/.parentlock"
+
+# No crash reporter window: on a TV nobody can click it, and it would sit on
+# top of the screen. systemd restarts the browser instead.
+export MOZ_CRASHREPORTER_DISABLE=1
+
+# --marionette (below) is how the web controller reaches Firefox, on
+# 127.0.0.1:2828 only. Without this preference Firefox would also switch on
+# the settings meant for automated test runs (safe browsing off and the
+# like); the kiosk stays an ordinary browser.
+printf '%s\n' \
+  '// Written by TVWallE kiosk-session at every start.' \
+  'user_pref("remote.prefs.recommended", false);' \
+  > "$profile/user.js"
+
+# Mozilla's package installs the command as firefox-esr; fall back to firefox.
+firefox="$(command -v firefox-esr || command -v firefox || true)"
+[ -n "$firefox" ] || { echo "TVWallE: Firefox ESR is not installed" >&2; exit 1; }
+
+# Open the start page first (the boot splash's logo, waits for the network),
+# with the real page after the "#"; it replaces itself with that page.
+START=/usr/local/share/tvwalle/start/index.html
+open="$url"
+if [ -r "$START" ]; then
+  open="file://$START#$url"
+fi
+
+"$firefox" --kiosk --marionette --profile "$profile" "$open" || true
+
+# Firefox has exited (closed, crashed, or ended by a stop): end sway too, so
+# systemd starts both again. After a stop sway is already gone, and there is
+# nothing to end.
+if [ -S "${SWAYSOCK:-}" ]; then
+  swaymsg exit >/dev/null 2>&1 || true
+fi

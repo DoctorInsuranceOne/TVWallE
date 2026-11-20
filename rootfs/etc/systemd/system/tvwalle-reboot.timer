@@ -1,0 +1,13 @@
+# TVWallE: restart the PC every night at 4:00 AM (local time). It picks up
+# kernel and Firefox updates (installed at 3:30) and clears whatever a browser
+# open around the clock builds up. Installed by TVWallE provision/install.sh.
+[Unit]
+Description=TVWallE nightly restart (4:00 AM)
+
+[Timer]
+OnCalendar=*-*-* 04:00
+# A PC that was off at 4:00 doesn't restart when it comes back.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

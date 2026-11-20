@@ -1,0 +1,9 @@
+# PAM session for the TVWallE kiosk (tvwalle-kiosk.service).
+# Installed by TVWallE provision/install.sh.
+#
+# systemd starts this session itself and never asks for a password, so there
+# is no auth section. common-session runs pam_systemd, which registers the
+# session with logind: that is what gives cage the screen and input devices.
+@include common-account
+session required pam_loginuid.so
+@include common-session

@@ -1,0 +1,6 @@
+#!/bin/sh
+# TVWallE: sets the web controller's password.
+#   sudo tvwalle-passwd                 asks for it twice
+#   sudo tvwalle-passwd < file          reads it from the first line
+# Installed by TVWallE provision/install.sh.
+exec /usr/bin/python3 /usr/local/lib/tvwalle/controller.py --set-password
